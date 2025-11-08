@@ -1,5 +1,5 @@
 export interface TodoItem {
-  id: number;
+  todo_id: number;
   user_id: number;
   title: string;
   description: string | null;

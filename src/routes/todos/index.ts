@@ -6,7 +6,7 @@ import type { CreateTodoDto } from "./todo.dto.js";
 import type { TodoItem } from "./todo.entity.js";
 
 type TodoRow = RowDataPacket & {
-  id: number;
+  todo_id: number;
   user_id: number;
   title: string;
   description: string | null;
@@ -20,7 +20,7 @@ const todoRouter = express.Router();
 todoRouter.get("/", async (req: Request, res: Response) => {
   const connection = await pool.getConnection();
   try {
-    const [rows] = await connection.execute("select * from Todos");
+    const [rows] = await connection.execute("SELECT * FROM Todos");
 
     res.status(200).json({
       success: true,
@@ -89,9 +89,9 @@ todoRouter.post("/", async (req: Request, res: Response) => {
 
     const [rows] = await connection.execute<TodoRow[]>(
       `
-        SELECT id, user_id, title, description, due_date, is_completed, created_at
+        SELECT todo_id, user_id, title, description, due_date, is_completed, created_at
         FROM Todos
-        WHERE id = ?
+        WHERE todo_id = ?
       `,
       [insertResult.insertId]
     );
@@ -103,7 +103,7 @@ todoRouter.post("/", async (req: Request, res: Response) => {
     }
 
     const createdTodo: TodoItem = {
-      id: Number(createdRow.id),
+      todo_id: Number(createdRow.todo_id),
       user_id: Number(createdRow.user_id),
       title: createdRow.title,
       description: createdRow.description,
