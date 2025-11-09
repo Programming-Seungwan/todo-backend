@@ -1,40 +1,37 @@
 import type { Request, Response } from "express";
 import express from "express";
-import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
-import pool from "../../database/connection.js";
+import { AppDataSource } from "../../database/dataSource.js";
 import type { CreateUserDto } from "./user.dto.js";
-import type { User } from "./user.entity.js";
-
-type UserRow = RowDataPacket & {
-  user_id: number;
-  email: string;
-  username: string;
-  password_hash: string;
-  created_at: Date;
-};
+import { User } from "./user.entity.js";
 
 const userRouter = express.Router();
 
-userRouter.get("/", async (req: Request, res: Response) => {
-  const connection = await pool.getConnection();
-  try {
-    const [rows] = await connection.execute<UserRow[]>(`
-      SELECT user_id, email, username, password_hash, created_at
-      FROM Users
-      ORDER BY user_id DESC
-    `);
+type UserResponse = {
+  userId: number;
+  email: string;
+  username: string;
+  passwordHash: string;
+  createdAt: Date;
+};
 
-    const users: User[] = rows.map((row) => ({
-      userId: Number(row.user_id),
-      email: row.email,
-      username: row.username,
-      passwordHash: row.password_hash,
-      createdAt: new Date(row.created_at),
+userRouter.get("/", async (req: Request, res: Response) => {
+  try {
+    const userRepo = AppDataSource.getRepository(User);
+    const users = await userRepo.find({
+      order: { userId: "DESC" },
+    });
+
+    const response: UserResponse[] = users.map((user) => ({
+      userId: Number(user.userId),
+      email: user.email,
+      username: user.username,
+      passwordHash: user.passwordHash,
+      createdAt: user.createdAt,
     }));
 
     res.status(200).json({
       success: true,
-      data: users,
+      data: response,
     });
   } catch (error) {
     console.error(error);
@@ -42,8 +39,6 @@ userRouter.get("/", async (req: Request, res: Response) => {
       success: false,
       message: "Failed to fetch users",
     });
-  } finally {
-    connection.release();
   }
 });
 
@@ -69,40 +64,21 @@ userRouter.post("/", async (req: Request, res: Response) => {
   const username = dto.username.trim();
   const passwordHash = dto.passwordHash.trim();
 
-  const connection = await pool.getConnection();
   try {
-    const insertSql = `
-      INSERT INTO Users (email, username, password_hash)
-      VALUES (?, ?, ?)
-    `;
-
-    const [result] = await connection.execute<ResultSetHeader>(insertSql, [
+    const userRepo = AppDataSource.getRepository(User);
+    const user = userRepo.create({
       email,
       username,
       passwordHash,
-    ]);
+    });
+    const savedUser = await userRepo.save(user);
 
-    const [rows] = await connection.execute<UserRow[]>(
-      `
-        SELECT user_id, email, username, password_hash, created_at
-        FROM Users
-        WHERE user_id = ?
-      `,
-      [result.insertId]
-    );
-
-    const createdRow = rows[0];
-
-    if (!createdRow) {
-      throw new Error("Failed to fetch newly created user");
-    }
-
-    const createdUser: User = {
-      userId: Number(createdRow.user_id),
-      email: createdRow.email,
-      username: createdRow.username,
-      passwordHash: createdRow.password_hash,
-      createdAt: new Date(createdRow.created_at),
+    const createdUser: UserResponse = {
+      userId: Number(savedUser.userId),
+      email: savedUser.email,
+      username: savedUser.username,
+      passwordHash: savedUser.passwordHash,
+      createdAt: savedUser.createdAt,
     };
 
     res.status(201).json({
@@ -115,8 +91,6 @@ userRouter.post("/", async (req: Request, res: Response) => {
       success: false,
       message: "Failed to create user",
     });
-  } finally {
-    connection.release();
   }
 });
 

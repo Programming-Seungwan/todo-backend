@@ -1,30 +1,42 @@
 import type { Request, Response } from "express";
 import express from "express";
-import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
-import pool from "../../database/connection.js";
+import { AppDataSource } from "../../database/dataSource.js";
+import { User } from "../users/user.entity.js";
 import type { CreateTodoDto } from "./todo.dto.js";
-import type { TodoItem } from "./todo.entity.js";
+import { Todo } from "./todo.entity.js";
 
-type TodoRow = RowDataPacket & {
+type TodoResponse = {
   todo_id: number;
   user_id: number;
   title: string;
   description: string | null;
   due_date: Date | null;
-  is_completed: 0 | 1;
-  created_at: Date;
+  is_completed: boolean;
+  createdAt: Date;
 };
 
 const todoRouter = express.Router();
 
 todoRouter.get("/", async (req: Request, res: Response) => {
-  const connection = await pool.getConnection();
   try {
-    const [rows] = await connection.execute("SELECT * FROM Todos");
+    const todoRepo = AppDataSource.getRepository(Todo);
+    const todos = await todoRepo.find({
+      order: { todoId: "DESC" },
+    });
+
+    const response: TodoResponse[] = todos.map((todo) => ({
+      todo_id: Number(todo.todoId),
+      user_id: Number(todo.userId),
+      title: todo.title,
+      description: todo.description,
+      due_date: todo.dueDate,
+      is_completed: todo.isCompleted,
+      createdAt: todo.createdAt,
+    }));
 
     res.status(200).json({
       success: true,
-      data: rows,
+      data: response,
     });
   } catch (error) {
     console.error(error);
@@ -32,8 +44,6 @@ todoRouter.get("/", async (req: Request, res: Response) => {
       success: false,
       message: "Failed to fetch todos",
     });
-  } finally {
-    connection.release();
   }
 });
 
@@ -67,63 +77,48 @@ todoRouter.post("/", async (req: Request, res: Response) => {
     return;
   }
 
-  const connection = await pool.getConnection();
   try {
-    const insertSql = `
-      INSERT INTO Todos (user_id, title, description, due_date, is_completed)
-      VALUES (?, ?, ?, ?, ?)
-    `;
+    const savedTodo = await AppDataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const todoRepo = manager.getRepository(Todo);
 
-    const isCompletedValue = dto.is_completed ? 1 : 0;
+      const user = await userRepo.findOneBy({ userId: dto.user_id });
+      if (!user) {
+        throw new Error("User not found");
+      }
 
-    const [insertResult] = await connection.execute<ResultSetHeader>(
-      insertSql,
-      [
-        dto.user_id,
+      const todo = todoRepo.create({
+        userId: user.userId,
+        user,
         title,
-        dto.description ?? null,
-        dueDateValue,
-        isCompletedValue,
-      ]
-    );
+        description: dto.description ?? null,
+        dueDate: dueDateValue,
+        isCompleted: dto.is_completed ?? false,
+      });
 
-    const [rows] = await connection.execute<TodoRow[]>(
-      `
-        SELECT todo_id, user_id, title, description, due_date, is_completed, created_at
-        FROM Todos
-        WHERE todo_id = ?
-      `,
-      [insertResult.insertId]
-    );
+      return todoRepo.save(todo);
+    });
 
-    const createdRow = rows[0];
-
-    if (!createdRow) {
-      throw new Error("Failed to fetch newly created todo");
-    }
-
-    const createdTodo: TodoItem = {
-      todo_id: Number(createdRow.todo_id),
-      user_id: Number(createdRow.user_id),
-      title: createdRow.title,
-      description: createdRow.description,
-      due_date: createdRow.due_date ? new Date(createdRow.due_date) : null,
-      is_completed: Boolean(createdRow.is_completed),
-      createdAt: new Date(createdRow.created_at),
+    const response: TodoResponse = {
+      todo_id: Number(savedTodo.todoId),
+      user_id: Number(savedTodo.userId),
+      title: savedTodo.title,
+      description: savedTodo.description,
+      due_date: savedTodo.dueDate,
+      is_completed: savedTodo.isCompleted,
+      createdAt: savedTodo.createdAt,
     };
 
     res.status(201).json({
       success: true,
-      data: createdTodo,
+      data: response,
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({
       success: false,
-      message: "Failed to create todo",
+      message: error instanceof Error ? error.message : "Failed to create todo",
     });
-  } finally {
-    connection.release();
   }
 });
 
