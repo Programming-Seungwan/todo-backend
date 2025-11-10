@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import express from "express";
 import { AppDataSource } from "../../database/dataSource.js";
+import { hashPassword } from "../../utils/auth/index.js";
 import type { CreateUserDto } from "./user.dto.js";
 import { User } from "./user.entity.js";
 
@@ -44,14 +45,15 @@ userRouter.get("/", async (req: Request, res: Response) => {
 
 userRouter.post("/", async (req: Request, res: Response) => {
   const dto = req.body as CreateUserDto;
+  const userRepo = AppDataSource.getRepository(User);
 
   if (
     typeof dto?.email !== "string" ||
     dto.email.trim().length === 0 ||
     typeof dto.username !== "string" ||
     dto.username.trim().length === 0 ||
-    typeof dto.passwordHash !== "string" ||
-    dto.passwordHash.trim().length === 0
+    typeof dto.password !== "string" ||
+    dto.password.trim().length === 0
   ) {
     res.status(400).json({
       success: false,
@@ -62,14 +64,23 @@ userRouter.post("/", async (req: Request, res: Response) => {
 
   const email = dto.email.trim();
   const username = dto.username.trim();
-  const passwordHash = dto.passwordHash.trim();
+  const password = dto.password.trim();
 
   try {
-    const userRepo = AppDataSource.getRepository(User);
+    const foundUser = await userRepo.findOne({
+      where: { email },
+    });
+
+    if (foundUser) {
+      throw new Error("USER_ALREADY_EXISTS");
+    }
+
+    const hashedPassword = await hashPassword(password);
+
     const user = userRepo.create({
       email,
       username,
-      passwordHash,
+      passwordHash: hashedPassword,
     });
     const savedUser = await userRepo.save(user);
 
@@ -87,6 +98,15 @@ userRouter.post("/", async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error(error);
+
+    if (error instanceof Error && error.message === "USER_ALREADY_EXISTS") {
+      res.status(409).json({
+        success: false,
+        message: `There is already user having email named ${email}`,
+      });
+      return;
+    }
+
     res.status(500).json({
       success: false,
       message: "Failed to create user",
