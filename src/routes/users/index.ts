@@ -43,7 +43,7 @@ userRouter.get("/", async (req: Request, res: Response) => {
   }
 });
 
-userRouter.post("/", async (req: Request, res: Response) => {
+userRouter.post("/signup", async (req: Request, res: Response) => {
   const dto = req.body as CreateUserDto;
   const userRepo = AppDataSource.getRepository(User);
 
